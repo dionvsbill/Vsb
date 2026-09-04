@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: vsbil-tube-boost-test
+    name: vsbil-tube-boost
     runtime: node
     plan: free
     branch: main
@@ -8,3 +8,74 @@ services:
     startCommand: npm start
     healthCheckPath: /
     autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+  - type: cron
+    name: vsbil-youtube-audit
+    runtime: node
+    plan: starter
+    branch: main
+    buildCommand: npm install
+    startCommand: >-
+      node -e "fetch(process.env.APP_URL + '/api/cron/youtube-audit',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+    schedule: "0 */6 * * *"
+    envVars:
+      - key: APP_URL
+        fromService:
+          type: web
+          name: vsbil-tube-boost
+          property: host
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: vsbil-tube-boost
+          envVarKey: CRON_SECRET
+
+  - type: cron
+    name: vsbil-expire-registrations
+    runtime: node
+    plan: starter
+    branch: main
+    buildCommand: npm install
+    startCommand: >-
+      node -e "fetch(process.env.APP_URL + '/api/cron/expire-registrations',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+    schedule: "15 * * * *"
+    envVars:
+      - key: APP_URL
+        fromService:
+          type: web
+          name: vsbil-tube-boost
+          property: host
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: vsbil-tube-boost
+          envVarKey: CRON_SECRET
