@@ -1,0 +1,3 @@
+import { NextResponse } from 'next/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+export async function GET(request:Request){if(request.headers.get('authorization')!==`Bearer ${process.env.CRON_SECRET}`)return NextResponse.json({error:'Unauthorized'},{status:401});const admin=createAdminClient();const {data:users}=await admin.from('users').select('id').eq('is_paid',false).lt('entry_fee_expires_at',new Date().toISOString()).is('deactivated_at',null).limit(100);let deleted=0;for(const u of users||[]){await admin.from('users').update({deactivated_at:new Date().toISOString()}).eq('id',u.id);const result=await admin.auth.admin.deleteUser(u.id);if(!result.error)deleted++}return NextResponse.json({expired:users?.length||0,deleted})}
