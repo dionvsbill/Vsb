@@ -1,9 +1,7 @@
 {
-  "name": "vsbil-tube-boost",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {"dev":"next dev","build":"next build","start":"next start","lint":"next lint","typecheck":"tsc --noEmit"},
-  "dependencies": {"@supabase/ssr":"latest","@supabase/supabase-js":"latest","clsx":"latest","framer-motion":"latest","lucide-react":"latest","next":"14.2.35","react":"18.3.1","react-dom":"18.3.1","tailwind-merge":"latest"},
-  "devDependencies": {"@types/node":"latest","@types/react":"latest","@types/react-dom":"latest","autoprefixer":"latest","postcss":"latest","tailwindcss":"latest","typescript":"latest"},
+  "name":"vsbil-tube-boost","version":"0.1.0","private":true,
+  "scripts":{"dev":"next dev","build":"next build","start":"next start","typecheck":"tsc --noEmit"},
+  "dependencies":{"@fingerprintjs/fingerprintjs":"latest","@supabase/ssr":"latest","@supabase/supabase-js":"latest","@upstash/ratelimit":"latest","@upstash/redis":"latest","clsx":"latest","framer-motion":"latest","lucide-react":"latest","next":"14.2.35","react":"18.3.1","react-dom":"18.3.1","tailwind-merge":"latest"},
+  "devDependencies":{"@types/node":"latest","@types/react":"latest","@types/react-dom":"latest","autoprefixer":"latest","postcss":"latest","tailwindcss":"latest","typescript":"latest"},
   "engines":{"node":">=20"}
 }
