@@ -1,4 +1,73 @@
 import { NextResponse } from 'next/server'
+import { createHash, randomBytes } from 'node:crypto'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-export async function POST(request:Request){try{const supabase=await createClient();const {data:{user}}=await supabase.auth.getUser();if(!user)return NextResponse.json({error:'Unauthorized'},{status:401});const {campaign_id,device_fingerprint}=await request.json();if(typeof campaign_id!=='string'||typeof device_fingerprint!=='string'||device_fingerprint.length<10)return NextResponse.json({error:'Invalid task request'},{status:400});const {data:p}=await supabase.from('users').select('is_paid,is_banned,device_fingerprint,youtube_channel_id').eq('id',user.id).single();if(!p?.is_paid||p.is_banned)return NextResponse.json({error:'Active paid account required'},{status:403});const admin=createAdminClient();if(p.device_fingerprint&&p.device_fingerprint!==device_fingerprint)return NextResponse.json({error:'Device verification failed'},{status:403});if(!p.device_fingerprint)await admin.from('users').update({device_fingerprint}).eq('id',user.id);const {data:c}=await admin.from('campaigns').select('id,user_id,status,quantity,completed_count,cost_per_task').eq('id',campaign_id).single();if(!c||!['approved','active'].includes(c.status)||c.user_id===user.id||c.completed_count>=c.quantity)return NextResponse.json({error:'Campaign unavailable'},{status:409});const {data:existing}=await admin.from('watch_tasks').select('id,status').eq('campaign_id',campaign_id).eq('worker_id',user.id).maybeSingle();if(existing)return NextResponse.json({error:'Task already attempted',task_id:existing.id},{status:409});const {data:task,error}=await admin.from('watch_tasks').insert({campaign_id,worker_id:user.id,status:'watching',watch_start:new Date().toISOString(),device_fingerprint,earning_amount:Number(c.cost_per_task)}).select('id').single();if(error)return NextResponse.json({error:'Unable to assign task'},{status:500});return NextResponse.json({task_id:task.id})}catch{return NextResponse.json({error:'Unable to start task'},{status:500})}}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const body = await request.json().catch(() => ({}))
+    const campaignId = typeof body.campaign_id === 'string' ? body.campaign_id : ''
+    const fingerprint = typeof body.device_fingerprint === 'string' ? body.device_fingerprint.trim() : ''
+    if (!campaignId || fingerprint.length < 10 || fingerprint.length > 256) {
+      return NextResponse.json({ error: 'Invalid task request' }, { status: 400 })
+    }
+
+    const { data: profile } = await supabase
+      .from('users')
+      .select('is_paid,is_banned,device_fingerprint')
+      .eq('id', user.id)
+      .single()
+    if (!profile?.is_paid || profile.is_banned) {
+      return NextResponse.json({ error: 'Active account required' }, { status: 403 })
+    }
+    if (profile.device_fingerprint && profile.device_fingerprint !== fingerprint) {
+      return NextResponse.json({ error: 'Device verification failed' }, { status: 403 })
+    }
+
+    const admin = createAdminClient()
+    if (!profile.device_fingerprint) {
+      const { error } = await admin.from('users').update({ device_fingerprint: fingerprint }).eq('id', user.id)
+      if (error) return NextResponse.json({ error: 'Unable to bind device' }, { status: 500 })
+    }
+
+    const { data: campaign } = await admin
+      .from('campaigns')
+      .select('id,user_id,status,quantity,completed_count,task_types,policy_review_status')
+      .eq('id', campaignId)
+      .single()
+
+    if (!campaign || campaign.user_id === user.id || !['approved', 'active'].includes(String(campaign.status))) {
+      return NextResponse.json({ error: 'Campaign unavailable' }, { status: 409 })
+    }
+
+    const taskTypes = Array.isArray(campaign.task_types) ? campaign.task_types.map(String) : []
+    const compliant = taskTypes.length > 0 && taskTypes.every((type) => ['discovery', 'feedback'].includes(type))
+    if (!compliant || campaign.policy_review_status !== 'approved') {
+      return NextResponse.json({ error: 'This campaign is not eligible for discovery tasks' }, { status: 409 })
+    }
+
+    const nonce = randomBytes(32).toString('hex')
+    const nonceHash = createHash('sha256').update(nonce).digest('hex')
+    const { data, error } = await admin.rpc('start_discovery_task', {
+      p_campaign_id: campaignId,
+      p_worker_id: user.id,
+      p_device_fingerprint: fingerprint,
+      p_nonce_hash: nonceHash,
+      p_session_ttl_seconds: 1800,
+    })
+
+    if (error) {
+      const known = String(error.message || '')
+      const status = known.includes('ALREADY') || known.includes('UNAVAILABLE') || known.includes('COMPLETE') ? 409 : 500
+      return NextResponse.json({ error: known || 'Unable to assign task' }, { status })
+    }
+
+    return NextResponse.json({ ...data, session_nonce: nonce })
+  } catch {
+    return NextResponse.json({ error: 'Unable to start task' }, { status: 500 })
+  }
+}
