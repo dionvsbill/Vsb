@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server'
 import { createHash, randomBytes } from 'node:crypto'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { enforceRateLimit } from '@/lib/rate-limit'
 
 export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const limited = await enforceRateLimit(`task-start:user:${user.id}`)
+    if (!limited.success) return NextResponse.json({ error: 'Too many task-start requests' }, { status: 429 })
 
     const body = await request.json().catch(() => ({}))
     const campaignId = typeof body.campaign_id === 'string' ? body.campaign_id : ''
