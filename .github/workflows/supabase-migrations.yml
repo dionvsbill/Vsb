@@ -1,0 +1,20 @@
+name: Supabase migrations
+on:
+  pull_request:
+    paths:
+      - supabase/**
+  workflow_dispatch:
+jobs:
+  migration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2
+        with:
+          version: 2.84.2
+      - name: Start clean Supabase database
+        run: supabase db start
+      - name: Replay every migration from empty state
+        run: supabase db reset --local --no-seed
+      - name: Lint database schema
+        run: supabase db lint --local
