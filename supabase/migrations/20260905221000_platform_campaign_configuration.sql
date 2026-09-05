@@ -1,0 +1,16 @@
+begin;
+alter table public.platform_settings add column if not exists entry_fee_minor bigint;
+alter table public.platform_settings add column if not exists campaign_min_quantity integer;
+alter table public.platform_settings add column if not exists campaign_max_quantity integer;
+alter table public.platform_settings add column if not exists campaign_min_cost_cents integer;
+alter table public.platform_settings add column if not exists campaign_max_cost_cents integer;
+alter table public.platform_settings add column if not exists campaign_platform_fee_bps integer;
+alter table public.platform_settings add column if not exists task_session_ttl_seconds integer;
+alter table public.platform_settings add column if not exists task_heartbeat_interval_seconds integer;
+alter table public.platform_settings add column if not exists task_inactivity_timeout_seconds integer;
+alter table public.platform_settings add column if not exists config_version bigint;
+update public.platform_settings set entry_fee_minor=coalesce(entry_fee_minor,round(coalesce(entry_fee_ghs,160)*100)::bigint),campaign_min_quantity=coalesce(campaign_min_quantity,1),campaign_max_quantity=coalesce(campaign_max_quantity,100000),campaign_min_cost_cents=coalesce(campaign_min_cost_cents,10),campaign_max_cost_cents=coalesce(campaign_max_cost_cents,100),campaign_platform_fee_bps=coalesce(campaign_platform_fee_bps,1000),task_session_ttl_seconds=coalesce(task_session_ttl_seconds,1800),task_heartbeat_interval_seconds=coalesce(task_heartbeat_interval_seconds,10),task_inactivity_timeout_seconds=coalesce(task_inactivity_timeout_seconds,60),config_version=coalesce(config_version,1) where id=true;
+alter table public.plans add column if not exists min_cost_cents integer;
+alter table public.plans add column if not exists max_cost_cents integer;
+update public.plans set min_cost_cents=coalesce(min_cost_cents,10),max_cost_cents=coalesce(max_cost_cents,100) where code='creator';
+commit;
