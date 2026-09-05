@@ -1,5 +1,10 @@
 name: Supabase migrations
 on:
+  push:
+    branches: [main]
+    paths:
+      - supabase/**
+      - .github/workflows/supabase-migrations.yml
   pull_request:
     paths:
       - supabase/**
