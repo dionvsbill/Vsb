@@ -1,0 +1,15 @@
+# Local Supabase configuration for reproducible migration tests.
+# Production is the connected Supabase project; this ID is only for local Docker state.
+project_id = "vsb-local"
+
+[db]
+major_version = 17
+
+[api]
+enabled = true
+
+[studio]
+enabled = true
+
+[auth]
+enabled = true
