@@ -2,107 +2,40 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getVideo, isoDurationSeconds } from '@/lib/youtube'
-
-const USD_MIN_CENTS = 10
-const USD_MAX_CENTS = 100
+import { createHash } from 'node:crypto'
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const { data: profile } = await supabase.from('users').select('is_paid,is_banned,email').eq('id', user.id).single()
-    if (!profile?.is_paid || profile.is_banned) return NextResponse.json({ error: 'Active account required' }, { status: 403 })
-
-    const idempotencyKey = request.headers.get('Idempotency-Key')?.trim() || ''
-    if (idempotencyKey.length < 16 || idempotencyKey.length > 128) {
-      return NextResponse.json({ error: 'A valid Idempotency-Key is required' }, { status: 400 })
-    }
-
-    const body = await request.json().catch(() => ({}))
-    const video = await getVideo(String(body.video_id || ''))
-    const taskTypes = Array.isArray(body.task_types) ? body.task_types.map(String) : ['discovery']
-    const allowed = ['discovery', 'feedback']
-    if (!taskTypes.length || !taskTypes.every((type: string) => allowed.includes(type))) {
-      return NextResponse.json({ error: 'Engagement-manipulation task types are not supported. Use discovery or feedback.' }, { status: 400 })
-    }
-
-    const quantity = Math.floor(Number(body.quantity))
-    const costCents = Math.round(Number(body.cost_per_task) * 100)
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) return NextResponse.json({ error: 'Quantity must be between 1 and 100,000' }, { status: 400 })
-    if (!Number.isInteger(costCents) || costCents < USD_MIN_CENTS || costCents > USD_MAX_CENTS) return NextResponse.json({ error: 'Cost per task must be between $0.10 and $1.00' }, { status: 400 })
-
-    const baseCents = quantity * costCents
-    const feeCents = Math.ceil(baseCents / 10)
-    const totalCents = baseCents + feeCents
-    const admin = createAdminClient()
-
-    const { data: existing } = await admin.from('transactions').select('metadata,paystack_ref,status').eq('user_id', user.id).eq('idempotency_key', idempotencyKey).maybeSingle()
-    if (existing) return NextResponse.json({ existing: true, reference: existing.paystack_ref, status: existing.status, metadata: existing.metadata })
-
-    const { data: fx } = await admin.from('fx_rates').select('rate_numeric').eq('base_currency', 'USD').eq('quote_currency', 'GHS').order('effective_from', { ascending: false }).limit(1).maybeSingle()
-    const rate = fx?.rate_numeric ? Number(fx.rate_numeric) : 160
-    const totalGhsMinor = Math.round(totalCents * rate)
-    const totalGhs = totalGhsMinor / 100
-
-    const { data: campaign, error } = await admin.from('campaigns').insert({
-      user_id: user.id,
-      youtube_video_id: video.id,
-      youtube_video_title: video.title,
-      youtube_channel_id: video.channelId,
-      thumbnail: video.thumbnail,
-      duration_seconds: isoDurationSeconds(video.duration),
-      task_types: taskTypes,
-      required_watch_percent: 0,
-      quantity,
-      cost_per_task: costCents / 100,
-      cost_per_task_minor: costCents,
-      total_budget: baseCents / 100,
-      total_budget_minor: baseCents,
-      platform_fee: feeCents / 100,
-      platform_fee_minor: feeCents,
-      total_charge_minor: totalCents,
-      promotion_mode: 'google_ads',
-      policy_review_status: 'pending',
-      status: 'pending_approval',
-    }).select('id').single()
-    if (error || !campaign) return NextResponse.json({ error: 'Unable to create campaign' }, { status: 500 })
-
-    const reference = `VSBIL-CAMP-${campaign.id.replaceAll('-', '').slice(0, 16)}-${Date.now()}`
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: profile.email,
-        amount: String(totalGhsMinor),
-        currency: 'GHS',
-        reference,
-        callback_url: `${process.env.NEXT_PUBLIC_APP_URL}/campaigns`,
-        metadata: { user_id: user.id, campaign_id: campaign.id, type: 'campaign_payment', idempotency_key: idempotencyKey },
-      }),
-    })
-    const payload = await response.json()
-    if (!response.ok || !payload.status) {
-      await admin.from('campaigns').delete().eq('id', campaign.id)
-      return NextResponse.json({ error: payload.message || 'Unable to initialize campaign payment' }, { status: 502 })
-    }
-
-    await admin.from('transactions').insert({
-      user_id: user.id,
-      type: 'campaign_payment',
-      amount: totalGhs,
-      amount_minor: totalGhsMinor,
-      currency: 'GHS',
-      paystack_ref: reference,
-      status: 'pending',
-      idempotency_key: idempotencyKey,
-      provider: 'paystack',
-      metadata: { campaign_id: campaign.id, total_usd_cents: totalCents, usd_ghs_rate: rate },
-    })
-
-    return NextResponse.json({ campaign_id: campaign.id, reference, authorization_url: payload.data.authorization_url, total_usd_cents: totalCents, total_ghs_minor: totalGhsMinor })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to create campaign' }, { status: 500 })
-  }
+    const supabase=await createClient(); const {data:{user}}=await supabase.auth.getUser()
+    if(!user)return NextResponse.json({error:'Unauthorized'},{status:401})
+    const {data:profile}=await supabase.from('users').select('is_paid,is_banned,email,email_verified_at').eq('id',user.id).single()
+    if(!profile?.email_verified_at)return NextResponse.json({error:'Verify your email before creating campaigns'},{status:403})
+    if(!profile?.is_paid||profile.is_banned)return NextResponse.json({error:'Active account required'},{status:403})
+    const key=request.headers.get('Idempotency-Key')?.trim()||''; if(!/^[A-Za-z0-9._:-]{16,128}$/.test(key))return NextResponse.json({error:'A valid Idempotency-Key is required'},{status:400})
+    const body=await request.json().catch(()=>({})); const video=await getVideo(String(body.video_id||'')); const taskTypes=Array.isArray(body.task_types)?body.task_types.map(String):[]
+    const allowed=['discovery','feedback']; if(taskTypes.length!==1||!taskTypes.every((x:string)=>allowed.includes(x)))return NextResponse.json({error:'Select one policy-approved promotion mode'},{status:400})
+    const quantity=Math.floor(Number(body.quantity)); const costCents=Math.round(Number(body.cost_per_task_cents ?? Number(body.cost_per_task)*100))
+    const admin=createAdminClient(); const [{data:settings},{data:fx},{data:plan}]=await Promise.all([
+      admin.from('platform_settings').select('*').eq('id',true).maybeSingle(),
+      admin.from('fx_rates').select('rate_numeric,effective_from').eq('base_currency','USD').eq('quote_currency','GHS').lte('effective_from',new Date().toISOString()).is('effective_to',null).order('effective_from',{ascending:false}).limit(1).maybeSingle(),
+      admin.from('plans').select('*').eq('code','creator').maybeSingle()
+    ])
+    const minQ=Number(settings?.campaign_min_quantity??1),maxQ=Number(settings?.campaign_max_quantity??100000),minC=Number(plan?.min_cost_cents??settings?.campaign_min_cost_cents??10),maxC=Number(plan?.max_cost_cents??settings?.campaign_max_cost_cents??100),feeBps=Number(settings?.campaign_platform_fee_bps??1000)
+    if(!Number.isInteger(quantity)||quantity<minQ||quantity>maxQ)return NextResponse.json({error:`Quantity must be between ${minQ} and ${maxQ}`},{status:400})
+    if(!Number.isInteger(costCents)||costCents<minC||costCents>maxC)return NextResponse.json({error:`Cost per promotion must be between $${(minC/100).toFixed(2)} and $${(maxC/100).toFixed(2)}`},{status:400})
+    if(!fx?.rate_numeric)return NextResponse.json({error:'Current USD/GHS exchange rate unavailable; payment cannot be initialized'},{status:503})
+    const requestHash=createHash('sha256').update(JSON.stringify({video_id:video.id,task_types:taskTypes,quantity,costCents})).digest('hex')
+    const {data:lock}=await admin.from('idempotency_keys').insert({scope:'campaign_create',key,request_hash:requestHash,locked_at:new Date().toISOString()}).select('id').maybeSingle()
+    if(!lock){const {data:old}=await admin.from('transactions').select('paystack_ref,status,metadata').eq('user_id',user.id).eq('idempotency_key',key).maybeSingle();if(old)return NextResponse.json({existing:true,reference:old.paystack_ref,status:old.status,metadata:old.metadata});return NextResponse.json({error:'Request is already being processed'},{status:409})}
+    const baseCents=quantity*costCents, feeCents=Math.ceil(baseCents*feeBps/10000), totalCents=baseCents+feeCents, rate=Number(fx.rate_numeric), totalGhsMinor=Math.round(totalCents*rate)
+    const {data:campaign,error}=await admin.from('campaigns').insert({user_id:user.id,youtube_video_id:video.id,youtube_video_title:video.title,youtube_channel_id:video.channelId,thumbnail:video.thumbnail,duration_seconds:isoDurationSeconds(video.duration),task_types:taskTypes,required_watch_percent:0,quantity,cost_per_task:costCents/100,cost_per_task_minor:costCents,total_budget:baseCents/100,total_budget_minor:baseCents,platform_fee:feeCents/100,platform_fee_minor:feeCents,total_charge_minor:totalCents,currency:'USD',promotion_mode:taskTypes[0],policy_review_status:'pending',status:'pending_approval'}).select('id').single()
+    if(error||!campaign)throw new Error('Unable to create campaign')
+    const reference=`VSBIL-CAMP-${campaign.id.replaceAll('-','').slice(0,16)}-${Date.now()}`
+    const response=await fetch('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{Authorization:`Bearer ${process.env.PAYSTACK_SECRET_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({email:profile.email,amount:String(totalGhsMinor),currency:'GHS',reference,callback_url:`${process.env.NEXT_PUBLIC_APP_URL}/campaigns`,metadata:{user_id:user.id,campaign_id:campaign.id,type:'campaign_payment',idempotency_key:key,fx_rate:rate}})})
+    const payload=await response.json(); if(!response.ok||!payload.status){await admin.from('campaigns').delete().eq('id',campaign.id);await admin.from('idempotency_keys').delete().eq('scope','campaign_create').eq('key',key);return NextResponse.json({error:payload.message||'Unable to initialize campaign payment'},{status:502})}
+    await admin.from('transactions').insert({user_id:user.id,type:'campaign_payment',amount:totalGhsMinor/100,amount_minor:totalGhsMinor,currency:'GHS',paystack_ref:reference,status:'pending',idempotency_key:key,provider:'paystack',metadata:{campaign_id:campaign.id,total_usd_cents:totalCents,fx_rate:rate,fx_effective_from:fx.effective_from}})
+    const result={campaign_id:campaign.id,reference,authorization_url:payload.data.authorization_url,total_usd_cents:totalCents,total_ghs_minor:totalGhsMinor,policy_review_status:'pending'}
+    await admin.from('idempotency_keys').update({response_status:200,response_body:result}).eq('scope','campaign_create').eq('key',key)
+    return NextResponse.json(result)
+  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to create campaign'},{status:500})}
 }
