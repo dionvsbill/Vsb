@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npm run typecheck && npm run build
     startCommand: npm start
     healthCheckPath: /
     autoDeploy: true
@@ -13,15 +13,19 @@ services:
         value: "20"
       - key: NEXT_PUBLIC_APP_URL
         sync: false
+      - key: NEXT_PUBLIC_ROOT_DOMAIN
+        sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
-      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
-      - key: SUPABASE_SECRET_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
         sync: false
       - key: PAYSTACK_SECRET_KEY
-        sync: false
-      - key: NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
         sync: false
       - key: PAYSTACK_WEBHOOK_SECRET
         sync: false
@@ -31,12 +35,30 @@ services:
         sync: false
       - key: YOUTUBE_API_KEY
         sync: false
-      - key: CRON_SECRET
-        generateValue: true
+      - key: NEXT_PUBLIC_FINGERPRINT_API_KEY
+        sync: false
       - key: UPSTASH_REDIS_REST_URL
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      - key: META_WA_TOKEN
+        sync: false
+      - key: META_WA_PHONE_ID
+        sync: false
+      - key: META_WA_VERIFY_TOKEN
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: JFORCE_API_URL
+        sync: false
+      - key: JFORCE_API_TOKEN
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
 
   - type: cron
     name: vsbil-youtube-audit
@@ -45,10 +67,10 @@ services:
     branch: main
     buildCommand: npm install
     startCommand: >-
-      node -e "fetch(process.env.APP_URL + '/api/cron/youtube-audit',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+      node -e "fetch('https://'+process.env.APP_HOST+'/api/cron/youtube-audit',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
     schedule: "0 */6 * * *"
     envVars:
-      - key: APP_URL
+      - key: APP_HOST
         fromService:
           type: web
           name: vsbil-tube-boost
@@ -66,10 +88,10 @@ services:
     branch: main
     buildCommand: npm install
     startCommand: >-
-      node -e "fetch(process.env.APP_URL + '/api/cron/expire-registrations',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+      node -e "fetch('https://'+process.env.APP_HOST+'/api/cron/expire-registrations',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
     schedule: "15 * * * *"
     envVars:
-      - key: APP_URL
+      - key: APP_HOST
         fromService:
           type: web
           name: vsbil-tube-boost

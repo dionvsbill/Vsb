@@ -1,48 +1,38 @@
 # VSBILL Creator Growth Platform
 
-VSBILL is a Ghana-ready creator growth and commerce platform. The YouTube area is the **Creator Promo Hub**. Campaigns use the label **TrueView Promo Campaigns (via Google Ads)** and worker activities use **Discovery & Engagement Tasks**.
-
-## Google verification statement
-
-We help creators grow via TrueView ad promotion and organic engagement tasks. No incentivized exchange.
+VSBILL is a Ghana-ready creator promotion, feedback and commerce platform. The creator area is intentionally policy-gated: it does **not** pay users to manufacture YouTube views, likes, subscriptions, comments or other artificial engagement. Creator campaigns are limited to policy-reviewed discovery/feedback and legitimate paid promotion integrations.
 
 ## Stack
 
-- Next.js 14 App Router + TypeScript
+- Next.js App Router + TypeScript
 - Tailwind CSS + Framer Motion + Lucide
 - Supabase Postgres/Auth/Realtime/Storage with RLS
 - Paystack GHS payments
 - Google OAuth + YouTube Data API v3
-- FingerprintJS device controls
-- Vercel Cron
-- Meta Cloud API-ready WhatsApp integration with an explicit development/mock state until real credentials are configured
+- FingerprintJS + Upstash Redis
+- Render Web Service + Render Cron Jobs
+- Meta Cloud API WhatsApp (Not Connected until real credentials are configured)
 
-## Production flows
+## Production architecture
 
-Registration requires email verification, Google/YouTube connection and a GHS 160 Paystack payment before activation. Entry allocations are 20% referral, 70% platform and 10% user cashback. Payment verification is server-side and webhook processing is idempotent.
+Registration is email verification -> YouTube connection -> server-created Paystack activation payment -> webhook verification -> atomic allocation -> activation. Money is stored in integer minor units and wallet mutations happen only through privileged database functions.
 
-Creator task verification records playback, foreground visibility, activity signals and required engagement verification. Fraud strikes are recorded server-side and recurring YouTube audits can revoke invalid engagement.
+Creator tasks use a server-bounded session and heartbeat state machine. Browser values are evidence only; the server controls task ownership, state, elapsed time, reward and wallet credit.
 
-Shop owners can create a storefront, manage products and orders, use JForce import with graceful manual fallback, and use escrow-style settlement functions. Free shops support up to 20 products and 100 WhatsApp conversations; Pro is GHS 149/month plus GHS 100 setup with the configured usage limits and fees.
+Shop checkout uses server-generated quotes, atomic stock reservation and Paystack verification. Seller funds are held until settlement. JForce import only runs when an authorized provider endpoint is configured; otherwise the API returns a manual-import fallback instead of pretending an integration exists.
 
-## Local setup
+WhatsApp uses Meta Cloud API only when server credentials are configured. Incoming webhooks are signature-checked and duplicate provider message IDs are ignored by the database.
 
-1. Copy `.env.example` to `.env.local` and fill every required provider secret.
-2. Configure Supabase Auth email verification and the project Data API/RLS.
-3. Enable YouTube Data API v3 and configure OAuth scopes `youtube.readonly` and `youtube.force-ssl`.
-4. Configure Paystack public/secret keys and the `/api/paystack/webhook` endpoint.
-5. Configure FingerprintJS and Upstash before production traffic.
-6. For WhatsApp, configure Meta Cloud API credentials only on the server and complete provider webhook verification before enabling real traffic.
-7. Run `npm install`, `npm run typecheck`, `npm run build`, then `npm start`.
+## Render deployment
 
-## Security
+VSBILL is deployed on **Render**, not Vercel. `render.yaml` defines the web service plus the six-hour YouTube audit and hourly registration-expiry cron jobs. Render cron schedules use UTC and are separate services.
 
-Never commit `.env` files or Supabase secret keys. Browser code must use only the publishable Supabase key. Sensitive provider credentials and YouTube refresh credentials stay server-side/encrypted. Wallet mutations are never accepted as trusted client values. Use RLS and database atomic functions for financial state transitions.
+Set every secret from `.env.example` in Render. Never commit `.env` files or service-role credentials. Run Supabase migrations from the repository before accepting production traffic.
 
-## Deployment
+## Supabase
 
-`vercel.json` schedules the six-hour YouTube audit and hourly registration-expiry job. A custom wildcard domain can be configured with `NEXT_PUBLIC_ROOT_DOMAIN`; requests to `<shop>.vsbill.com` are rewritten to `/shop/<shop>` by middleware.
+The migration directory is replayable from an empty project. The canonical financial tables are `wallet_accounts` and `wallet_entries`; legacy decimal balance fields are compatibility data and are not mutated by new financial code. All sensitive provider events are idempotent.
 
-## Status
+## Compliance
 
-Provider-dependent features intentionally show a not-connected/development state until real credentials are present. The application does not fabricate successful payments, wallet credits or WhatsApp connections.
+Public verification statement: “We help creators grow via TrueView ad promotion and organic engagement tasks. No incentivized exchange.” The application blocks manipulative YouTube task types. Current YouTube policy should be reviewed before launch. YouTube explicitly prohibits artificial increases in views/likes/comments/subscribers and content that exists solely to incentivize engagement.

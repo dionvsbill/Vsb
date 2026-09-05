@@ -2,49 +2,9 @@ import { NextResponse } from 'next/server'
 import crypto from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-export async function POST(request: Request) {
-  const raw = await request.text()
-  const signature = request.headers.get('x-paystack-signature') || ''
-  const secret = process.env.PAYSTACK_WEBHOOK_SECRET || process.env.PAYSTACK_SECRET_KEY || ''
-  const expected = secret ? crypto.createHmac('sha512', secret).update(raw).digest('hex') : ''
-  try {
-    if (!secret || !signature || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-  } catch { return NextResponse.json({ error: 'Invalid signature' }, { status: 401 }) }
-
-  try {
-    const event = JSON.parse(raw)
-    const data = event?.data
-    if (event?.event !== 'charge.success') return NextResponse.json({ received: true })
-    const userId = data?.metadata?.user_id
-    const reference = data?.reference
-    const kind = data?.metadata?.type
-    const paidMinor = Number(data?.amount)
-    if (typeof userId !== 'string' || typeof reference !== 'string' || data?.currency !== 'GHS' || !Number.isSafeInteger(paidMinor) || paidMinor <= 0) return NextResponse.json({ received: true })
-
-    const admin = createAdminClient()
-    const { data: tx } = await admin.from('transactions').select('id,user_id,amount_minor,currency,type,status,metadata').eq('paystack_ref', reference).eq('user_id', userId).maybeSingle()
-    if (!tx) return NextResponse.json({ received: true })
-    if (tx.status === 'success') return NextResponse.json({ received: true, alreadyProcessed: true })
-    if (Number(tx.amount_minor) !== paidMinor || tx.currency !== data.currency) return NextResponse.json({ error: 'Amount mismatch' }, { status: 400 })
-    if (kind !== 'entry_fee' && kind !== 'campaign_payment') return NextResponse.json({ received: true })
-    if (tx.type !== kind) return NextResponse.json({ error: 'Payment type mismatch' }, { status: 400 })
-
-    const meta = tx.metadata && typeof tx.metadata === 'object' ? tx.metadata as Record<string, unknown> : {}
-    const campaignId = kind === 'campaign_payment' && typeof meta.campaign_id === 'string' ? meta.campaign_id : null
-    const eventId = `${event.event}:${String(data.id || '')}:${reference}`
-    const { data: result, error } = await admin.rpc('process_paystack_charge_success', {
-      p_event_id: eventId,
-      p_event_type: event.event,
-      p_user_id: userId,
-      p_reference: reference,
-      p_payment_type: kind,
-      p_amount_minor: paidMinor,
-      p_currency: data.currency,
-      p_provider_transaction_id: String(data.id || ''),
-      p_campaign_id: campaignId,
-      p_payload: event,
-    })
-    if (error) return NextResponse.json({ error: error.message || 'Webhook processing failed' }, { status: 500 })
-    return NextResponse.json({ received: true, result })
-  } catch { return NextResponse.json({ error: 'Invalid webhook' }, { status: 400 }) }
-}
+export async function POST(request:Request){const raw=await request.text();const signature=request.headers.get('x-paystack-signature')||'';const secret=process.env.PAYSTACK_WEBHOOK_SECRET||process.env.PAYSTACK_SECRET_KEY||'';if(!secret)return NextResponse.json({error:'Webhook secret not configured'},{status:503});const expected=crypto.createHmac('sha512',secret).update(raw).digest('hex');if(signature.length!==expected.length||!crypto.timingSafeEqual(Buffer.from(signature),Buffer.from(expected)))return NextResponse.json({error:'Invalid signature'},{status:401});let event:any;try{event=JSON.parse(raw)}catch{return NextResponse.json({error:'Invalid webhook JSON'},{status:400})};const data=event?.data;if(event?.event!=='charge.success')return NextResponse.json({received:true});const reference=String(data?.reference||'');const amount=Number(data?.amount);if(!reference||!Number.isSafeInteger(amount)||amount<=0||data?.currency!=='GHS')return NextResponse.json({error:'Invalid payment payload'},{status:400});const a=createAdminClient();const eventId=`${event.event}:${String(data.id||'')}:${reference}`;const {data:duplicate}=await a.from('webhook_events').select('id,processing_status').eq('provider','paystack').eq('event_id',eventId).maybeSingle();if(duplicate?.processing_status==='processed')return NextResponse.json({received:true,duplicate:true});const {data:stored,error:storeError}=await a.from('webhook_events').upsert({provider:'paystack',event_type:event.event,event_id:eventId,signature_valid:true,payload:event,processing_status:'processing'},{onConflict:'provider,event_id'}).select('id').single();if(storeError)return NextResponse.json({error:'Webhook persistence failed'},{status:500});
+try{const verify=await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,{headers:{Authorization:`Bearer ${process.env.PAYSTACK_SECRET_KEY}`}});const verified=await verify.json().catch(()=>({}));if(!verify.ok||!verified?.status||verified?.data?.status!=='success'||Number(verified.data.amount)!==amount||verified.data.currency!=='GHS')throw new Error('Paystack verification failed');
+ const {data:tx}=await a.from('transactions').select('id,user_id,type,amount_minor,currency,metadata,status').eq('paystack_ref',reference).maybeSingle();if(tx){if(Number(tx.amount_minor)!==amount||tx.currency!=='GHS')throw new Error('Transaction amount mismatch');const kind=String(tx.type);if(kind!=='entry_fee'&&kind!=='campaign_payment')throw new Error('Unsupported transaction type');const campaignId=kind==='campaign_payment'&&typeof tx.metadata?.campaign_id==='string'?tx.metadata.campaign_id:null;await a.rpc('process_paystack_charge_success',{p_event_id:eventId,p_event_type:event.event,p_user_id:tx.user_id,p_reference:reference,p_payment_type:kind,p_amount_minor:amount,p_currency:'GHS',p_provider_transaction_id:String(data.id||''),p_campaign_id:campaignId,p_payload:event});}
+ const {data:order}=await a.from('shop_orders').select('id,total_minor,payment_status').eq('payment_reference',reference).maybeSingle();if(order){if(Number(order.total_minor)!==amount)throw new Error('Order amount mismatch');await a.from('shop_orders').update({payment_status:'paid',status:'processing',updated_at:new Date().toISOString()}).eq('id',order.id);await a.from('shop_order_events').insert({order_id:order.id,status:'paid',note:'Paystack webhook verified'});}
+ await a.from('webhook_events').update({processing_status:'processed',processed_at:new Date().toISOString(),error_message:null}).eq('id',stored.id);return NextResponse.json({received:true});
+}catch(e){await a.from('webhook_events').update({processing_status:'failed',error_message:e instanceof Error?e.message:'Webhook processing failed'}).eq('id',stored.id);return NextResponse.json({error:e instanceof Error?e.message:'Webhook processing failed'},{status:500})}}
