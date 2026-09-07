@@ -7,23 +7,24 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          package-manager-cache: false
-      - name: Install dependencies reproducibly
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --package-lock-only --ignore-scripts
-            npm ci
-          fi
-      - run: npm run typecheck
-      - run: npm run build
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
         env:
           NEXT_PUBLIC_APP_URL: https://example.invalid
+          NEXT_PUBLIC_ROOT_DOMAIN: example.invalid
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high
