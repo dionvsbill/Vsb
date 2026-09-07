@@ -1,12 +1,12 @@
 services:
   - type: web
-    name: vsbil-tube-boost
+    name: vsbill-web
     runtime: node
-    plan: free
+    plan: starter
     branch: main
-    buildCommand: npm install && npm run typecheck && npm run build
+    buildCommand: npm ci && npm run typecheck && npm run build
     startCommand: npm start
-    healthCheckPath: /
+    healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
@@ -17,7 +17,7 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
@@ -51,6 +51,34 @@ services:
         sync: false
       - key: META_APP_SECRET
         sync: false
+      - key: META_GRAPH_API_VERSION
+        sync: false
+      - key: FACEBOOK_APP_ID
+        sync: false
+      - key: FACEBOOK_APP_SECRET
+        sync: false
+      - key: FACEBOOK_ADS_ACCESS_TOKEN
+        sync: false
+      - key: FACEBOOK_AD_ACCOUNT_ID
+        sync: false
+      - key: INSTAGRAM_APP_ID
+        sync: false
+      - key: INSTAGRAM_APP_SECRET
+        sync: false
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: TIKTOK_APP_ID
+        sync: false
+      - key: TIKTOK_APP_SECRET
+        sync: false
+      - key: TIKTOK_ADVERTISER_ID
+        sync: false
+      - key: GOOGLE_ADS_DEVELOPER_TOKEN
+        sync: false
+      - key: GOOGLE_ADS_CUSTOMER_ID
+        sync: false
+      - key: GOOGLE_ADS_LOGIN_CUSTOMER_ID
+        sync: false
       - key: ENCRYPTION_KEY
         sync: false
       - key: JFORCE_API_URL
@@ -61,11 +89,11 @@ services:
         generateValue: true
 
   - type: cron
-    name: vsbil-youtube-audit
+    name: vsbill-youtube-audit
     runtime: node
     plan: starter
     branch: main
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: >-
       node -e "fetch('https://'+process.env.APP_HOST+'/api/cron/youtube-audit',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
     schedule: "0 */6 * * *"
@@ -73,20 +101,20 @@ services:
       - key: APP_HOST
         fromService:
           type: web
-          name: vsbil-tube-boost
+          name: vsbill-web
           property: host
       - key: CRON_SECRET
         fromService:
           type: web
-          name: vsbil-tube-boost
+          name: vsbill-web
           envVarKey: CRON_SECRET
 
   - type: cron
-    name: vsbil-expire-registrations
+    name: vsbill-expire-registrations
     runtime: node
     plan: starter
     branch: main
-    buildCommand: npm install
+    buildCommand: npm ci
     startCommand: >-
       node -e "fetch('https://'+process.env.APP_HOST+'/api/cron/expire-registrations',{headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
     schedule: "15 * * * *"
@@ -94,10 +122,10 @@ services:
       - key: APP_HOST
         fromService:
           type: web
-          name: vsbil-tube-boost
+          name: vsbill-web
           property: host
       - key: CRON_SECRET
         fromService:
           type: web
-          name: vsbil-tube-boost
+          name: vsbill-web
           envVarKey: CRON_SECRET
