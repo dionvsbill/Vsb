@@ -12,9 +12,18 @@ export async function POST(request:Request,{params}:RouteContext){
   const {id,action:rawAction}=await params
   const supabase=await createClient();const {data:{user}}=await supabase.auth.getUser();if(!user)return NextResponse.json({error:'Unauthorized'},{status:401})
   const admin=createAdminClient();const {data:actor}=await admin.from('users').select('role,is_banned').eq('id',user.id).single();if(!actor||actor.is_banned||!['admin','superadmin'].includes(actor.role))return NextResponse.json({error:'Forbidden'},{status:403})
-  const action=rawAction.toLowerCase();if(!transitions[action])return NextResponse.json({error:'Unsupported campaign action'},{status:400})
-  const body=await request.json().catch(()=>({}));const reason=typeof body.reason==='string'?body.reason.trim():'';if(action!=='approve'&&!reason)return NextResponse.json({error:'A reason is required'},{status:400})
+  const action=rawAction.toLowerCase();const body=await request.json().catch(()=>({}));const reason=typeof body.reason==='string'?body.reason.trim():''
   const {data:c}=await admin.from('campaigns').select('id,user_id,status,policy_review_status').eq('id',id).single();if(!c)return NextResponse.json({error:'Campaign not found'},{status:404})
+  if(action==='policy_approve'||action==='policy_reject'){
+   if(c.policy_review_status!=='pending')return NextResponse.json({error:`Policy review is already ${c.policy_review_status}`},{status:409})
+   if(action==='policy_reject'&&!reason)return NextResponse.json({error:'A reason is required'},{status:400})
+   const patch=action==='policy_approve'?{policy_review_status:'approved',rejection_reason:null,updated_at:new Date().toISOString()}:{policy_review_status:'rejected',rejection_reason:reason,updated_at:new Date().toISOString()}
+   const {error}=await admin.from('campaigns').update(patch).eq('id',id).eq('policy_review_status','pending');if(error)return NextResponse.json({error:error.message},{status:500})
+   await admin.from('audit_logs').insert({actor_id:user.id,action:`campaign.${action}`,target_type:'campaign',target_id:id,metadata:{reason:reason||null}})
+   return NextResponse.json({success:true,campaign_id:id,policy_review_status:patch.policy_review_status})
+  }
+  if(!transitions[action])return NextResponse.json({error:'Unsupported campaign action'},{status:400})
+  if(action!=='approve'&&!reason)return NextResponse.json({error:'A reason is required'},{status:400})
   if(!(allowed[action]||[]).includes(String(c.status)))return NextResponse.json({error:`Cannot ${action} a campaign in ${c.status} state`},{status:409})
   if(action==='approve'&&c.policy_review_status!=='approved')return NextResponse.json({error:'Campaign policy review is not approved'},{status:409})
   const next=transitions[action];const patch:Record<string,unknown>={status:next,updated_at:new Date().toISOString()};if(action==='approve')Object.assign(patch,{approved_by:user.id,approved_at:new Date().toISOString(),rejection_reason:null});if(action==='reject')patch.rejection_reason=reason
